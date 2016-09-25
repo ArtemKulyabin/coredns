@@ -22,6 +22,8 @@ type Config struct {
 
 	// Compiled middleware stack.
 	middlewareChain middleware.Handler
+
+	isSocketActivated bool
 }
 
 // GetConfig gets the Config that corresponds to c.

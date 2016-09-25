@@ -1,11 +1,14 @@
 package dnsserver
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 
+	"github.com/coreos/go-systemd/activation"
 	"github.com/miekg/coredns/middleware"
 
 	"github.com/mholt/caddy"
@@ -114,6 +117,14 @@ func groupConfigsByListenAddr(configs []*Config) (map[string][]*Config, error) {
 		if conf.Port == "" {
 			conf.Port = Port
 		}
+		if conf.Port == "sa" {
+			port, err := setupSockets()
+			if err != nil {
+				return nil, fmt.Errorf("Can't setup socket activation: %s", err.Error())
+			}
+			conf.Port = port
+			conf.isSocketActivated = true
+		}
 		addr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(conf.ListenHost, conf.Port))
 		if err != nil {
 			return nil, err
@@ -123,6 +134,37 @@ func groupConfigsByListenAddr(configs []*Config) (map[string][]*Config, error) {
 	}
 
 	return groups, nil
+}
+
+func setupSockets() (string, error) {
+	if socketActivatedListener == nil {
+		listeners, err := activation.Listeners(false)
+		if err != nil {
+			return "", err
+		}
+		packetConns, err := activation.PacketConns(true)
+		if err != nil {
+			return "", err
+		}
+		for _, l := range listeners {
+			if l != nil {
+				socketActivatedListener = l
+			}
+		}
+		for _, p := range packetConns {
+			if p != nil {
+				socketActivatedPacketConn = p
+			}
+		}
+		if socketActivatedListener == nil {
+			return "", errors.New("No listeners")
+		}
+		if socketActivatedPacketConn == nil {
+			return "", errors.New("No packet connections")
+		}
+	}
+	port := socketActivatedListener.Addr().(*net.TCPAddr).Port
+	return strconv.Itoa(port), nil
 }
 
 const (
@@ -141,4 +183,7 @@ var (
 
 	// Quiet mode will not show any informative output on initialization.
 	Quiet bool
+
+	socketActivatedListener   net.Listener
+	socketActivatedPacketConn net.PacketConn
 )

@@ -35,6 +35,8 @@ type Server struct {
 	zones       map[string]*Config // zones keyed by their address
 	dnsWg       sync.WaitGroup     // used to wait on outstanding connections
 	connTimeout time.Duration      // the maximum duration of a graceful shutdown
+
+	isSocketActivated bool
 }
 
 // NewServer returns a new CoreDNS server and compiles all middleware in to it.
@@ -58,6 +60,7 @@ func NewServer(addr string, group []*Config) (*Server, error) {
 	s.dnsWg.Add(1)
 
 	for _, site := range group {
+		s.isSocketActivated = site.isSocketActivated
 		// set the config per zone
 		s.zones[site.Zone] = site
 		// compile custom middleware for everything
@@ -91,9 +94,17 @@ func (s *Server) ServePacket(p net.PacketConn) error {
 
 // Listen implements caddy.TCPServer interface.
 func (s *Server) Listen() (net.Listener, error) {
-	l, err := net.Listen("tcp", s.Addr)
-	if err != nil {
-		return nil, err
+	var (
+		l   net.Listener
+		err error
+	)
+	if s.isSocketActivated {
+		l = socketActivatedListener
+	} else {
+		l, err = net.Listen("tcp", s.Addr)
+		if err != nil {
+			return nil, err
+		}
 	}
 	s.m.Lock()
 	s.l = l
@@ -103,11 +114,18 @@ func (s *Server) Listen() (net.Listener, error) {
 
 // ListenPacket implements caddy.UDPServer interface.
 func (s *Server) ListenPacket() (net.PacketConn, error) {
-	p, err := net.ListenPacket("udp", s.Addr)
-	if err != nil {
-		return nil, err
+	var (
+		p   net.PacketConn
+		err error
+	)
+	if s.isSocketActivated {
+		p = socketActivatedPacketConn
+	} else {
+		p, err = net.ListenPacket("udp", s.Addr)
+		if err != nil {
+			return nil, err
+		}
 	}
-
 	s.m.Lock()
 	s.p = p
 	s.m.Unlock()
